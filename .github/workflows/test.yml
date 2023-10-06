@@ -88,6 +88,9 @@ jobs:
           cache-dependency-path: 'package-lock.json'
 
       - name: Run linter
+        run: npm install
+
+      - name: Run linter
         run: npm run lint
 
       - name: Verify code style
