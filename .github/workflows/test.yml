@@ -1,0 +1,94 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  rust-test:
+    name: Run Rust tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: luau-types-re-export
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+  rust-code-style:
+    name: Verify Rust code style
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: luau-types-re-export
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Verify code format
+        run: cargo fmt -- --check
+
+  wasm-build:
+    name: Build wasm artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'latest'
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        run: wasm-pack build luau-types-re-export -t nodejs
+
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 'latest'
+          cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Verify code style
+        run: npm run style
