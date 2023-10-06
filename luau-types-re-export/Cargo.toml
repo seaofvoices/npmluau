@@ -1,0 +1,28 @@
+[package]
+name = "luau-types-re-export"
+version = "0.1.0"
+authors = ["jeparlefrancais <jeparlefrancais21@gmail.com>"]
+edition = "2021"
+description = "a small crate to re-export Luau types in WebAssembly"
+repository = "https://github.com/seaofvoices/npmluau"
+license = "MIT"
+
+[badges]
+github = { repository = "seaofvoices/npmluau" }
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+full_moon = { version = "0.18.1", features = ["roblox"] }
+stylua = { version = "0.18.2", features = ["luau"], default-features = false }
+wasm-bindgen = "0.2"
+
+[dev-dependencies]
+insta = "1.33.0"
+
+[profile.release]
+lto = true
+opt-level = 's'
