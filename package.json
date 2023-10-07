@@ -22,7 +22,7 @@
     "npmluau": "main.js"
   },
   "scripts": {
-    "build": "wasm-pack build luau-types-re-export --target nodejs --release && rm -f luau-types-re-export/pkg/.gitignore",
+    "prepare": "wasm-pack build luau-types-re-export --target nodejs --release && rm -f luau-types-re-export/pkg/.gitignore",
     "test": "cargo test --manifest-path luau-types-re-export/Cargo.toml",
     "lint": "eslint main.js src/",
     "format": "prettier . --write",
