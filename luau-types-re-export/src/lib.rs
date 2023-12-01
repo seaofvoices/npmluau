@@ -8,6 +8,7 @@ use full_moon::{
         Suffix, Value, Var,
     },
     tokenizer::{Symbol, Token, TokenReference, TokenType},
+    visitors::Visitor,
     ShortString,
 };
 use stylua_lib::Config;
@@ -49,35 +50,23 @@ fn create_symbol(symbol: Symbol) -> TokenReference {
     )
 }
 
-#[wasm_bindgen]
-pub fn reexport(module_path: &str, code: &str) -> Result<String, String> {
-    let parsed_code =
-        full_moon::parse(code).map_err(|err| format!("unable to parse code: {}", err))?;
+struct CollectTypeExports {
+    identifier: TokenReference,
+    statements: Vec<Stmt>,
+}
 
-    let identifier = create_identifier("module");
-    let require_token = create_identifier("require");
-    let module_path_token = create_string(module_path);
+impl CollectTypeExports {
+    fn new(identifier: TokenReference) -> Self {
+        Self {
+            identifier,
+            statements: Default::default(),
+        }
+    }
+}
 
-    let module_definition = LocalAssignment::new(into_punctuated(identifier.clone()))
-        .with_expressions(into_punctuated(Expression::Value {
-            value: Box::new(Value::FunctionCall(
-                FunctionCall::new(Prefix::Name(require_token)).with_suffixes(vec![Suffix::Call(
-                    Call::AnonymousCall(full_moon::ast::FunctionArgs::String(module_path_token)),
-                )]),
-            )),
-            type_assertion: None,
-        }))
-        .with_equal_token(Some(create_symbol(Symbol::Equal)));
-
-    let return_module = Return::new().with_returns(into_punctuated(Expression::Value {
-        value: Box::new(Value::Var(Var::Name(identifier.clone()))),
-        type_assertion: None,
-    }));
-
-    let export_statements = parsed_code
-        .nodes()
-        .stmts()
-        .filter_map(|statement| match statement {
+impl Visitor for CollectTypeExports {
+    fn visit_block(&mut self, node: &Block) {
+        let export_statements = node.stmts().filter_map(|statement| match statement {
             full_moon::ast::Stmt::ExportedTypeDeclaration(declaration) => {
                 let declaration = declaration.type_declaration();
 
@@ -122,7 +111,7 @@ pub fn reexport(module_path: &str, code: &str) -> Result<String, String> {
                 };
 
                 let re_declaration = declaration.clone().with_type_definition(TypeInfo::Module {
-                    module: identifier.clone(),
+                    module: self.identifier.clone(),
                     punctuation: TokenReference::symbol(".").ok()?,
                     type_info: Box::new(indexed_type_info),
                 });
@@ -134,11 +123,44 @@ pub fn reexport(module_path: &str, code: &str) -> Result<String, String> {
             _ => None,
         });
 
+        self.statements.extend(export_statements);
+    }
+}
+
+#[wasm_bindgen]
+pub fn reexport(module_path: &str, code: &str) -> Result<String, String> {
+    let parsed_code =
+        full_moon::parse(code).map_err(|err| format!("unable to parse code: {}", err))?;
+
+    let identifier = create_identifier("module");
+    let require_token = create_identifier("require");
+    let module_path_token = create_string(module_path);
+
+    let module_definition = LocalAssignment::new(into_punctuated(identifier.clone()))
+        .with_expressions(into_punctuated(Expression::Value {
+            value: Box::new(Value::FunctionCall(
+                FunctionCall::new(Prefix::Name(require_token)).with_suffixes(vec![Suffix::Call(
+                    Call::AnonymousCall(full_moon::ast::FunctionArgs::String(module_path_token)),
+                )]),
+            )),
+            type_assertion: None,
+        }))
+        .with_equal_token(Some(create_symbol(Symbol::Equal)));
+
+    let return_module = Return::new().with_returns(into_punctuated(Expression::Value {
+        value: Box::new(Value::Var(Var::Name(identifier.clone()))),
+        type_assertion: None,
+    }));
+
+    let mut collect_exports = CollectTypeExports::new(identifier);
+
+    collect_exports.visit_ast(&parsed_code);
+
     let new_ast = parsed_code.clone().with_nodes(
         Block::new()
             .with_stmts(
                 iter::once(Stmt::LocalAssignment(module_definition))
-                    .chain(export_statements)
+                    .chain(collect_exports.statements)
                     .map(|statement| (statement, None))
                     .collect(),
             )
@@ -168,6 +190,21 @@ mod tests {
             "../packages/module",
             r"
 export type Value = number
+        ",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!("export_simple_type_name", result);
+    }
+
+    #[test]
+    fn export_simple_type_name_in_do_block() {
+        let result = reexport(
+            "../packages/module",
+            r"
+do
+    export type Value = number
+end
         ",
         )
         .unwrap();
