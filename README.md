@@ -9,6 +9,12 @@ If you are developing on a platform that does not support requires with, you can
 Add `npmluau` in your dev-dependencies:
 
 ```bash
+yarn add --dev npmluau
+```
+
+Or if you are using `npm`:
+
+```bash
 npm install --save-dev npmluau
 ```
 
@@ -24,7 +30,7 @@ In your Luau project `package.json` file, add a `prepare` script to run `npmluau
 
 This utility will generate a folder named `.luau-aliases` inside `node_modules` after installing your dependencies that contains module links to each dependency.
 
-_[Luau-lsp](https://github.com/JohnnyMorganz/luau-lsp)_:
+**[Luau-lsp](https://github.com/JohnnyMorganz/luau-lsp)**:
 
 If you using the VS code extension, you can define a directory alias in your workspace settings:
 

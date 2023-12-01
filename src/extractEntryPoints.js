@@ -2,6 +2,7 @@ const fs = require('fs/promises')
 const path = require('path')
 
 const { reexport } = require('../luau-types-re-export/pkg')
+const log = require('./log')
 
 const SELF_NAME = 'npmluau'
 
@@ -16,17 +17,38 @@ const SUPPORTED_EXTENSIONS = [
 ]
 const RE_EXPORT_EXTENSIONS = ['.lua', '.luau']
 
-const extractEntryPoint = async (contentPath, nodeModulesPath) => {
+const extractEntryPoint = async (contentPath, parentPath, level = 1) => {
   if (contentPath.startsWith('.')) {
+    log.trace(`skipping '${contentPath}'`)
     return null
   }
 
-  const packagePath = path.join(nodeModulesPath, contentPath, 'package.json')
+  const fullContentPath = path.join(parentPath, contentPath)
+
+  if (contentPath.startsWith('@')) {
+    log.trace(`found scope entry '${contentPath}'`)
+    return await fs
+      .readdir(fullContentPath)
+      .catch((_) => {
+        return []
+      })
+      .then((content) =>
+        Promise.all(
+          content.flatMap((scopeContentPath) =>
+            extractEntryPoint(scopeContentPath, fullContentPath, level + 1)
+          )
+        )
+      )
+      .then((entries) => entries.flat().filter((package) => !!package))
+  }
+
+  const packagePath = path.join(fullContentPath, 'package.json')
   const packageContent = await fs.readFile(packagePath).catch((_err) => {
     return null
   })
 
   if (packageContent === null) {
+    log.trace(`skipping '${contentPath}' (no package.json)`)
     return null
   }
 
@@ -37,19 +59,24 @@ const extractEntryPoint = async (contentPath, nodeModulesPath) => {
     packageName = name
     packageMain = main
   } catch (err) {
-    console.warn(
-      `unable to parse package definition at \`${packagePath}\`: ${err}`
-    )
+    log.warn(`unable to parse package definition at \`${packagePath}\`: ${err}`)
     return null
   }
 
-  if (packageMain === null || packageName === SELF_NAME) {
+  if (packageMain === null) {
+    log.trace(`skipping '${contentPath}' (no package name and main defined)`)
+    return null
+  } else if (packageName === SELF_NAME) {
+    log.trace(`skipping '${contentPath}'`)
     return null
   }
+  log.trace(
+    `found package '${packageName}' with entry point at '${packageMain}' (${fullContentPath})`
+  )
 
-  const entryPoint = path.join(contentPath, packageMain)
+  const entryPoint = path.join(packageName, packageMain)
 
-  const entryPointFullPath = path.join(nodeModulesPath, entryPoint)
+  const entryPointFullPath = path.join(fullContentPath, packageMain)
 
   const entryPointContent = await fs
     .readFile(entryPointFullPath)
@@ -59,10 +86,13 @@ const extractEntryPoint = async (contentPath, nodeModulesPath) => {
     })
 
   if (entryPointContent === null) {
+    log.trace(`unable to read entry point at '${entryPointFullPath}`)
     return null
   }
 
-  const relativeRequirePath = path.join('..', entryPoint).replace(/\\/g, '/')
+  const relativeRequirePath = path
+    .join(...Array(level).fill('..'), entryPoint)
+    .replace(/\\/g, '/')
 
   let reExportedEntryPoint = null
   try {
@@ -78,7 +108,7 @@ const extractEntryPoint = async (contentPath, nodeModulesPath) => {
       return null
     }
   } catch (err) {
-    console.warn(
+    log.warn(
       `  unable to re-export types for \`${packageName}\` from \`${entryPointFullPath}\`: ${err}`
     )
     return null
@@ -94,13 +124,11 @@ const extractAllEntryPoints = async (nodeModulesPath) => {
     return []
   })
 
-  const result = await Promise.all(
+  const entryPoints = await Promise.all(
     content.map((contentPath) =>
       extractEntryPoint(contentPath, nodeModulesPath)
     )
-  )
-
-  const entryPoints = result.filter((package) => !!package)
+  ).then((packages) => packages.flat().filter((package) => !!package))
 
   return entryPoints
 }
@@ -110,6 +138,9 @@ const extractEntryPointsToFile = async (
   { output, extension }
 ) => {
   const aliases = await extractAllEntryPoints(nodeModulesPath)
+  log.info(
+    `extracted ${aliases.length} entry point${aliases.length > 1 ? 's' : ''}`
+  )
 
   try {
     await fs.rm(output, { recursive: true })
@@ -127,8 +158,14 @@ const extractEntryPointsToFile = async (
     aliases.map(async ({ name, entryPoint }) => {
       const fileEntryPoint = path.join(output, name + '.' + extension)
 
+      log.debug(`about to write entry point '${fileEntryPoint}'`)
+
+      await fs
+        .mkdir(path.dirname(fileEntryPoint), { recursive: true })
+        .catch((_) => {})
+
       return await fs.writeFile(fileEntryPoint, entryPoint).catch((err) => {
-        console.warn(
+        log.warn(
           `unable to write require redirection file at \`${fileEntryPoint}\` for \`${name}\`: ${err}`
         )
       })
