@@ -1,6 +1,6 @@
 [package]
 name = "luau-types-re-export"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["jeparlefrancais <jeparlefrancais21@gmail.com>"]
 edition = "2021"
 description = "a small crate to re-export Luau types in WebAssembly"

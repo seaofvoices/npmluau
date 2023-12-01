@@ -1,6 +1,6 @@
 {
   "name": "npmluau",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A utility package to use npm for Luau projects",
   "keywords": [
     "luau",
