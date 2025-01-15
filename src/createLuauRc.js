@@ -4,7 +4,7 @@ const path = require('path')
 const NOCHECK_CONFIG = JSON.stringify(
   {
     languageMode: 'nocheck',
-    aliases: { '@pkg': './.luau-aliases' },
+    aliases: { 'pkg': './.luau-aliases' },
   },
   null,
   4
