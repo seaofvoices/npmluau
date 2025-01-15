@@ -2,10 +2,10 @@ use std::iter;
 
 use full_moon::{
     ast::{
+        luau::{ExportedTypeDeclaration, GenericParameterInfo, IndexedTypeInfo, TypeInfo},
         punctuated::{Pair, Punctuated},
-        types::{ExportedTypeDeclaration, GenericParameterInfo, IndexedTypeInfo, TypeInfo},
         Block, Call, Expression, FunctionCall, LastStmt, LocalAssignment, Prefix, Return, Stmt,
-        Suffix, Value, Var,
+        Suffix, Var,
     },
     tokenizer::{Symbol, Token, TokenReference, TokenType},
     visitors::Visitor,
@@ -35,7 +35,7 @@ fn create_string(content: &str) -> TokenReference {
         Vec::new(),
         Token::new(TokenType::StringLiteral {
             literal: ShortString::new(content),
-            multi_line: None,
+            multi_line_depth: 0,
             quote_type: full_moon::tokenizer::StringLiteralQuoteType::Double,
         }),
         Vec::new(),
@@ -81,10 +81,10 @@ impl Visitor for CollectTypeExports {
 
                             let generic_value = match pair.value().parameter() {
                                 GenericParameterInfo::Name(name) => TypeInfo::Basic(name.clone()),
-                                GenericParameterInfo::Variadic { name, ellipse } => {
+                                GenericParameterInfo::Variadic { name, ellipsis } => {
                                     TypeInfo::GenericPack {
                                         name: name.clone(),
-                                        ellipse: ellipse.clone(),
+                                        ellipsis: ellipsis.clone(),
                                     }
                                 }
                                 _ => unimplemented!("unknown GenericParameterInfo variant"),
@@ -129,28 +129,35 @@ impl Visitor for CollectTypeExports {
 
 #[wasm_bindgen]
 pub fn reexport(module_path: &str, code: &str) -> Result<String, String> {
-    let parsed_code =
-        full_moon::parse(code).map_err(|err| format!("unable to parse code: {}", err))?;
+    let parsed_code = full_moon::parse(code).map_err(|errors| match errors.len() {
+        0 => "failed to parse code".to_owned(),
+        1 => {
+            format!(
+                "unable to parse code: {}",
+                errors.first().expect("expected one error")
+            )
+        }
+        _ => {
+            let display_errors: Vec<_> = errors.into_iter().map(|err| err.to_string()).collect();
+            format!("unable to parse code:\n- {}", display_errors.join("\n- "))
+        }
+    })?;
 
     let identifier = create_identifier("module");
     let require_token = create_identifier("require");
     let module_path_token = create_string(module_path);
 
     let module_definition = LocalAssignment::new(into_punctuated(identifier.clone()))
-        .with_expressions(into_punctuated(Expression::Value {
-            value: Box::new(Value::FunctionCall(
-                FunctionCall::new(Prefix::Name(require_token)).with_suffixes(vec![Suffix::Call(
-                    Call::AnonymousCall(full_moon::ast::FunctionArgs::String(module_path_token)),
-                )]),
-            )),
-            type_assertion: None,
-        }))
+        .with_expressions(into_punctuated(Expression::FunctionCall(
+            FunctionCall::new(Prefix::Name(require_token)).with_suffixes(vec![Suffix::Call(
+                Call::AnonymousCall(full_moon::ast::FunctionArgs::String(module_path_token)),
+            )]),
+        )))
         .with_equal_token(Some(create_symbol(Symbol::Equal)));
 
-    let return_module = Return::new().with_returns(into_punctuated(Expression::Value {
-        value: Box::new(Value::Var(Var::Name(identifier.clone()))),
-        type_assertion: None,
-    }));
+    let return_module = Return::new().with_returns(into_punctuated(Expression::Var(Var::Name(
+        identifier.clone(),
+    ))));
 
     let mut collect_exports = CollectTypeExports::new(identifier);
 
@@ -169,15 +176,20 @@ pub fn reexport(module_path: &str, code: &str) -> Result<String, String> {
 
     let formatted_ast = stylua_lib::format_ast(
         new_ast,
-        Config::new()
-            .with_quote_style(stylua_lib::QuoteStyle::AutoPreferSingle)
-            .with_column_width(80),
+        get_stylua_config(),
         None,
         stylua_lib::OutputVerification::None,
     )
     .map_err(|err| format!("unable to format code: {}", err))?;
 
-    Ok(full_moon::print(&formatted_ast))
+    Ok(formatted_ast.to_string())
+}
+
+fn get_stylua_config() -> Config {
+    let mut config = Config::new();
+    config.quote_style = stylua_lib::QuoteStyle::AutoPreferSingle;
+    config.column_width = 80;
+    config
 }
 
 #[cfg(test)]
