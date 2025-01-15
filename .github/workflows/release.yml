@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: The version to release starting with `v`
+        required: true
+        type: string
+      release_ref:
+        description: The branch, tag or SHA to checkout (default to latest)
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish-package:
+    name: Publish package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Roblox/setup-foreman@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: latest
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Verify code style
+        run: npm run style
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-release:
+    needs: publish-package
+    name: Create release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create tag
+        run: |
+          git fetch --tags --no-recurse-submodules
+          if [ ! $(git tag -l ${{ inputs.release_tag }}) ]; then
+            git tag ${{ inputs.release_tag }}
+            git push origin ${{ inputs.release_tag }}
+          fi
+
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_tag }}
+          draft: false
