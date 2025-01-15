@@ -2,7 +2,10 @@ use std::iter;
 
 use full_moon::{
     ast::{
-        luau::{ExportedTypeDeclaration, GenericParameterInfo, IndexedTypeInfo, TypeInfo},
+        luau::{
+            ExportedTypeDeclaration, GenericDeclarationParameter, GenericParameterInfo,
+            IndexedTypeInfo, TypeFieldKey, TypeInfo,
+        },
         punctuated::{Pair, Punctuated},
         Block, Call, Expression, FunctionCall, LastStmt, LocalAssignment, Prefix, Return, Stmt,
         Suffix, Var,
@@ -64,13 +67,115 @@ impl CollectTypeExports {
     }
 }
 
+fn remove_generics_foreign_default(
+    generic_parameters: Punctuated<GenericDeclarationParameter>,
+) -> Punctuated<full_moon::ast::luau::GenericDeclarationParameter> {
+    let new_generics = generic_parameters
+        .into_pairs()
+        .map(|mut generic_parameter| {
+            if let Some(default_generic_parameter) = generic_parameter.value_mut().default_type() {
+                if has_private_type(default_generic_parameter) {
+                    let new_value = generic_parameter.value().clone().with_default(None);
+
+                    *generic_parameter.value_mut() = new_value;
+                }
+            }
+            generic_parameter
+        })
+        .collect();
+    new_generics
+}
+
+// make a best effort at keeping types which can re-export easily
+fn has_private_type(type_info: &TypeInfo) -> bool {
+    let mut check_types = vec![type_info];
+
+    while let Some(current) = check_types.pop() {
+        match current {
+            TypeInfo::Array { type_info, .. } => {
+                check_types.push(type_info);
+            }
+            TypeInfo::Basic(token_reference) => {
+                if let Some(value) = is_standard_type(token_reference) {
+                    return value;
+                }
+            }
+            TypeInfo::String(_) | TypeInfo::Boolean(_) => {}
+            TypeInfo::Callback {
+                arguments,
+                return_type,
+                ..
+            } => {
+                check_types.push(return_type);
+                for argument in arguments.into_iter() {
+                    check_types.push(argument.type_info());
+                }
+            }
+            TypeInfo::Intersection(type_intersection) => {
+                for sub_type in type_intersection.types().into_iter() {
+                    check_types.push(sub_type);
+                }
+            }
+            TypeInfo::Union(type_union) => {
+                for sub_type in type_union.types().into_iter() {
+                    check_types.push(sub_type);
+                }
+            }
+            TypeInfo::Optional { base, .. } => {
+                check_types.push(base);
+            }
+            TypeInfo::Table { fields, .. } => {
+                for field in fields.into_iter() {
+                    check_types.push(field.value());
+                    match field.key() {
+                        TypeFieldKey::Name(_) => {}
+                        TypeFieldKey::IndexSignature { inner, .. } => {
+                            check_types.push(inner);
+                        }
+                        _ => return true,
+                    }
+                }
+            }
+            TypeInfo::Tuple { types, .. } => {
+                for sub_type in types.into_iter() {
+                    check_types.push(sub_type);
+                }
+            }
+            TypeInfo::Variadic { type_info, .. } => {
+                check_types.push(type_info);
+            }
+            TypeInfo::Generic { .. }
+            | TypeInfo::GenericPack { .. }
+            | TypeInfo::Typeof { .. }
+            | TypeInfo::Module { .. }
+            | TypeInfo::VariadicPack { .. }
+            | _ => {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn is_standard_type(token_reference: &TokenReference) -> Option<bool> {
+    match token_reference.token().to_string().as_str() {
+        "string" | "boolean" | "nil" | "number" | "userdata" | "buffer" | "thread" | "never"
+        | "any" | "unknown" => {}
+        _ => return Some(true),
+    }
+    None
+}
+
 impl Visitor for CollectTypeExports {
     fn visit_block(&mut self, node: &Block) {
         let export_statements = node.stmts().filter_map(|statement| match statement {
-            full_moon::ast::Stmt::ExportedTypeDeclaration(declaration) => {
+            Stmt::ExportedTypeDeclaration(declaration) => {
                 let declaration = declaration.type_declaration();
 
-                let indexed_type_info = if let Some(generics_declaration) = declaration.generics() {
+                let (indexed_type_info, new_generics) = if let Some(generics_declaration) =
+                    declaration.generics()
+                {
                     let arrows = generics_declaration.arrows().clone();
 
                     let generics = generics_declaration
@@ -101,20 +206,33 @@ impl Visitor for CollectTypeExports {
                             punctuated
                         });
 
-                    IndexedTypeInfo::Generic {
-                        base: declaration.type_name().clone(),
-                        arrows,
-                        generics,
-                    }
+                    (
+                        IndexedTypeInfo::Generic {
+                            base: declaration.type_name().clone(),
+                            arrows,
+                            generics,
+                        },
+                        Some(generics_declaration.clone().with_generics(
+                            remove_generics_foreign_default(
+                                generics_declaration.generics().clone(),
+                            ),
+                        )),
+                    )
                 } else {
-                    IndexedTypeInfo::Basic(declaration.type_name().clone())
+                    (
+                        IndexedTypeInfo::Basic(declaration.type_name().clone()),
+                        None,
+                    )
                 };
 
-                let re_declaration = declaration.clone().with_type_definition(TypeInfo::Module {
-                    module: self.identifier.clone(),
-                    punctuation: TokenReference::symbol(".").ok()?,
-                    type_info: Box::new(indexed_type_info),
-                });
+                let re_declaration = declaration
+                    .clone()
+                    .with_generics(new_generics)
+                    .with_type_definition(TypeInfo::Module {
+                        module: self.identifier.clone(),
+                        punctuation: TokenReference::symbol(".").ok()?,
+                        type_info: Box::new(indexed_type_info),
+                    });
 
                 Some(Stmt::ExportedTypeDeclaration(ExportedTypeDeclaration::new(
                     re_declaration,
@@ -248,6 +366,48 @@ export type List<T=string> = { T }
         .unwrap();
 
         insta::assert_snapshot!("export_simple_generic_type_with_default", result);
+    }
+
+    #[test]
+    fn export_simple_generic_type_with_default_simple_array() {
+        let result = reexport(
+            "../packages/module",
+            r"
+export type List<T = { number }> = { T }
+        ",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!(
+            "export_simple_generic_type_with_default_simple_array",
+            result
+        );
+    }
+
+    #[test]
+    fn export_generic_type_with_unexported_default() {
+        let result = reexport(
+            "../packages/module",
+            r"
+export type List<T=Object> = { T }
+        ",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!("export_generic_type_with_unexported_default", result);
+    }
+
+    #[test]
+    fn export_generic_type_with_unexported_default_array_of_object() {
+        let result = reexport(
+            "../packages/module",
+            r"
+export type List<T={ Object }> = { T }
+        ",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!("export_generic_type_with_unexported_default", result);
     }
 
     #[test]

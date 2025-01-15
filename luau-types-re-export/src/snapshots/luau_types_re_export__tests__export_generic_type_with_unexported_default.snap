@@ -1,0 +1,7 @@
+---
+source: src/lib.rs
+expression: result
+---
+local module = require('../packages/module')
+export type List<T> = module.List<T>
+return module
