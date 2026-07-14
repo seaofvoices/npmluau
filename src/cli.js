@@ -8,7 +8,7 @@ const { removeFiles } = require('./removeFiles')
 const { createNoCheckLuauRc } = require('./createLuauRc')
 const fs = require('fs').promises
 
-const CLI_VERSION = '0.1.2'
+const CLI_VERSION = '0.1.3'
 
 const getLevelFilterFromVerbosity = (value) => {
   switch (value) {
