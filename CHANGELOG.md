@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
 - support type functions (full-moon upgrade) ([#14](https://github.com/seaofvoices/npmluau/pull/14))
 

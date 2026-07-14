@@ -1,6 +1,6 @@
 {
   "name": "npmluau",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A utility package to use npm for Luau projects",
   "keywords": ["luau", "roblox", "package", "npm", "yarn", "lune"],
   "author": "jeparlefrancais <jeparlefrancais21@gmail.com>",
