@@ -14,19 +14,17 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   publish-package:
     name: Publish package
     runs-on: ubuntu-latest
+    environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: Roblox/setup-foreman@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v7
         with:
           node-version: latest
           registry-url: 'https://registry.npmjs.org'
@@ -43,9 +41,7 @@ jobs:
         run: npm run style
 
       - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
   create-release:
     needs: publish-package
@@ -54,7 +50,7 @@ jobs:
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Create tag
         run: |
@@ -66,7 +62,7 @@ jobs:
 
       - name: Create release
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

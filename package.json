@@ -2,14 +2,7 @@
   "name": "npmluau",
   "version": "0.1.2",
   "description": "A utility package to use npm for Luau projects",
-  "keywords": [
-    "luau",
-    "roblox",
-    "package",
-    "npm",
-    "yarn",
-    "lune"
-  ],
+  "keywords": ["luau", "roblox", "package", "npm", "yarn", "lune"],
   "author": "jeparlefrancais <jeparlefrancais21@gmail.com>",
   "repository": {
     "type": "git",
@@ -24,18 +17,18 @@
   "scripts": {
     "prepare": "wasm-pack build luau-types-re-export --target nodejs --release && rm -f luau-types-re-export/pkg/.gitignore",
     "test": "cargo test --manifest-path luau-types-re-export/Cargo.toml",
-    "lint": "eslint main.js src/",
-    "format": "prettier . --write",
-    "style": "prettier . --check"
+    "lint": "biome lint main.js src/",
+    "format": "biome format . --write",
+    "style": "biome format .",
+    "verify-pack": "npm pack --dry-run",
+    "biome": "biome"
   },
   "dependencies": {
-    "commander": "^11.0.0",
+    "commander": "^15.0.0",
     "walkdir": "^0.4.1"
   },
   "devDependencies": {
-    "eslint": "^8.50.0",
-    "eslint-config-prettier": "^9.0.0",
-    "prettier": "3.0.3",
-    "wasm-pack": "^0.12.1"
+    "@biomejs/biome": "2.5.3",
+    "wasm-pack": "^0.15.0"
   }
 }

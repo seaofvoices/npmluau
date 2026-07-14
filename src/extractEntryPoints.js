@@ -39,7 +39,7 @@ const extractEntryPoint = async (contentPath, parentPath, level = 1) => {
           )
         )
       )
-      .then((entries) => entries.flat().filter((package) => !!package))
+      .then((entries) => entries.flat().filter(removeNulls))
   }
 
   const packagePath = path.join(fullContentPath, 'package.json')
@@ -128,7 +128,7 @@ const extractAllEntryPoints = async (nodeModulesPath) => {
     content.map((contentPath) =>
       extractEntryPoint(contentPath, nodeModulesPath)
     )
-  ).then((packages) => packages.flat().filter((package) => !!package))
+  ).then((packages) => packages.flat().filter(removeNulls))
 
   return entryPoints
 }
@@ -171,6 +171,10 @@ const extractEntryPointsToFile = async (
       })
     })
   )
+}
+
+function removeNulls(value) {
+  return !!value
 }
 
 module.exports = {

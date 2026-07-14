@@ -3,12 +3,13 @@ use std::iter;
 use full_moon::{
     ast::{
         luau::{
-            ExportedTypeDeclaration, GenericDeclarationParameter, GenericParameterInfo,
-            IndexedTypeInfo, TypeFieldKey, TypeInfo,
+            ExportedTypeDeclaration, GenericDeclaration, GenericDeclarationParameter,
+            GenericParameterInfo, IndexedTypeInfo, TypeDeclaration, TypeFieldKey, TypeInfo,
         },
         punctuated::{Pair, Punctuated},
-        Block, Call, Expression, FunctionCall, LastStmt, LocalAssignment, Prefix, Return, Stmt,
-        Suffix, Var,
+        span::ContainedSpan,
+        Block, Call, Expression, FunctionCall, LastStmt, LocalAssignment, Parameter, Prefix,
+        Return, Stmt, Suffix, Var,
     },
     tokenizer::{Symbol, Token, TokenReference, TokenType},
     visitors::Visitor,
@@ -20,6 +21,22 @@ use wasm_bindgen::prelude::wasm_bindgen;
 fn into_punctuated<T>(value: T) -> Punctuated<T> {
     let mut punctuated = Punctuated::new();
     punctuated.push(Pair::End(value));
+    punctuated
+}
+
+fn fold_punctuated<T>(
+    mut values: impl Iterator<Item = T>,
+    separator: impl Fn() -> TokenReference,
+) -> Punctuated<T> {
+    let mut punctuated = Punctuated::new();
+    if let Some(first) = values.next() {
+        punctuated.push(Pair::End(first));
+    }
+
+    for value in values {
+        punctuated.push_punctuated(value, separator());
+    }
+
     punctuated
 }
 
@@ -178,39 +195,26 @@ impl Visitor for CollectTypeExports {
                 {
                     let arrows = generics_declaration.arrows().clone();
 
-                    let generics = generics_declaration
-                        .generics()
-                        .pairs()
-                        .map(|pair| {
-                            let punctation = pair.punctuation().cloned();
-
-                            let generic_value = match pair.value().parameter() {
-                                GenericParameterInfo::Name(name) => TypeInfo::Basic(name.clone()),
-                                GenericParameterInfo::Variadic { name, ellipsis } => {
-                                    TypeInfo::GenericPack {
-                                        name: name.clone(),
-                                        ellipsis: ellipsis.clone(),
-                                    }
+                    let generics = generics_declaration.generics().iter().map(|pair| {
+                        let generic_value = match pair.parameter() {
+                            GenericParameterInfo::Name(name) => TypeInfo::Basic(name.clone()),
+                            GenericParameterInfo::Variadic { name, ellipsis } => {
+                                TypeInfo::GenericPack {
+                                    name: name.clone(),
+                                    ellipsis: ellipsis.clone(),
                                 }
-                                _ => unimplemented!("unknown GenericParameterInfo variant"),
-                            };
-
-                            (punctation, generic_value)
-                        })
-                        .fold(Punctuated::new(), |mut punctuated, (punctuation, value)| {
-                            if let Some(token) = punctuation {
-                                punctuated.push(Pair::Punctuated(value, token));
-                            } else {
-                                punctuated.push(Pair::End(value));
                             }
-                            punctuated
-                        });
+                            _ => unimplemented!("unknown GenericParameterInfo variant"),
+                        };
+
+                        generic_value
+                    });
 
                     (
                         IndexedTypeInfo::Generic {
                             base: declaration.type_name().clone(),
                             arrows,
-                            generics,
+                            generics: fold_punctuated(generics, || create_symbol(Symbol::Comma)),
                         },
                         Some(generics_declaration.clone().with_generics(
                             remove_generics_foreign_default(
@@ -236,6 +240,57 @@ impl Visitor for CollectTypeExports {
 
                 Some(Stmt::ExportedTypeDeclaration(ExportedTypeDeclaration::new(
                     re_declaration,
+                )))
+            }
+            Stmt::ExportedTypeFunction(type_function) => {
+                let function = type_function.type_function();
+                let body = function.function_body();
+
+                let parameters: Vec<_> = body
+                    .parameters()
+                    .iter()
+                    .filter_map(|parameter| match parameter {
+                        Parameter::Name(name) => Some(name),
+                        Parameter::Ellipsis(_) => None,
+                        _ => None,
+                    })
+                    .collect();
+
+                let declaration_generics = fold_punctuated(
+                    parameters.iter().map(|parameter| {
+                        GenericDeclarationParameter::new(GenericParameterInfo::Name(
+                            (*parameter).clone(),
+                        ))
+                    }),
+                    || create_symbol(Symbol::Comma),
+                );
+                let type_generics =
+                    fold_punctuated(parameters.into_iter().cloned().map(TypeInfo::Basic), || {
+                        create_symbol(Symbol::Comma)
+                    });
+
+                let type_declaration = TypeDeclaration::new(
+                    function.function_name().clone(),
+                    TypeInfo::Module {
+                        module: self.identifier.clone(),
+                        punctuation: TokenReference::symbol(".").ok()?,
+                        type_info: Box::new(IndexedTypeInfo::Generic {
+                            base: function.function_name().clone(),
+                            arrows: ContainedSpan::new(
+                                create_symbol(Symbol::LessThan),
+                                create_symbol(Symbol::GreaterThan),
+                            ),
+                            generics: type_generics,
+                        }),
+                    },
+                )
+                .with_generics(
+                    (!declaration_generics.is_empty())
+                        .then(|| GenericDeclaration::new().with_generics(declaration_generics)),
+                );
+
+                Some(Stmt::ExportedTypeDeclaration(ExportedTypeDeclaration::new(
+                    type_declaration,
                 )))
             }
             _ => None,
@@ -324,7 +379,14 @@ export type Value = number
         )
         .unwrap();
 
-        insta::assert_snapshot!("export_simple_type_name", result);
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type Value = module.Value
+        return module
+        ",
+        );
     }
 
     #[test]
@@ -339,7 +401,14 @@ end
         )
         .unwrap();
 
-        insta::assert_snapshot!("export_simple_type_name", result);
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type Value = module.Value
+        return module
+        ",
+        );
     }
 
     #[test]
@@ -352,7 +421,14 @@ export type List<T> = { T }
         )
         .unwrap();
 
-        insta::assert_snapshot!("export_simple_generic_type", result);
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type List<T> = module.List<T>
+        return module
+        ",
+        );
     }
 
     #[test]
@@ -365,7 +441,14 @@ export type List<T=string> = { T }
         )
         .unwrap();
 
-        insta::assert_snapshot!("export_simple_generic_type_with_default", result);
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type List<T = string> = module.List<T>
+        return module
+        "
+        );
     }
 
     #[test]
@@ -379,8 +462,12 @@ export type List<T = { number }> = { T }
         .unwrap();
 
         insta::assert_snapshot!(
-            "export_simple_generic_type_with_default_simple_array",
-            result
+            result,
+            @"
+        local module = require('../packages/module')
+        export type List<T = { number }> = module.List<T>
+        return module
+        "
         );
     }
 
@@ -394,7 +481,14 @@ export type List<T=Object> = { T }
         )
         .unwrap();
 
-        insta::assert_snapshot!("export_generic_type_with_unexported_default", result);
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type List<T> = module.List<T>
+        return module
+        "
+        );
     }
 
     #[test]
@@ -407,7 +501,14 @@ export type List<T={ Object }> = { T }
         )
         .unwrap();
 
-        insta::assert_snapshot!("export_generic_type_with_unexported_default", result);
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type List<T> = module.List<T>
+        return module
+        "
+        );
     }
 
     #[test]
@@ -420,7 +521,14 @@ export type Fn<R...> = () -> R...
         )
         .unwrap();
 
-        insta::assert_snapshot!("export_generic_type_with_generic_pack", result);
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type Fn<R...> = module.Fn<R...>
+        return module
+        "
+        );
     }
 
     #[test]
@@ -433,7 +541,14 @@ export type Fn<R...=()> = () -> R...
         )
         .unwrap();
 
-        insta::assert_snapshot!("export_generic_type_with_generic_pack_with_default", result);
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type Fn<R... = ()> = module.Fn<R...>
+        return module
+        "
+        );
     }
 
     #[test]
@@ -447,8 +562,56 @@ export type Fn<Arg, R...> = (Arg) -> R...
         .unwrap();
 
         insta::assert_snapshot!(
-            "export_generic_type_with_type_name_and_generic_pack",
-            result
+            result,
+            @"
+        local module = require('../packages/module')
+        export type Fn<Arg, R...> = module.Fn<Arg, R...>
+        return module
+        "
+        );
+    }
+
+    #[test]
+    fn export_type_function_with_no_parameters() {
+        let result = reexport(
+            "../packages/module",
+            r"
+export type function Example()
+    return types.singleton(nil)
+end
+        ",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type Example = module.Example<>
+        return module
+        "
+        );
+    }
+
+    #[test]
+    fn export_type_function_with_parameters() {
+        let result = reexport(
+            "../packages/module",
+            r"
+export type function Example(K, V)
+    return types.singleton(nil)
+end
+        ",
+        )
+        .unwrap();
+
+        insta::assert_snapshot!(
+            result,
+            @"
+        local module = require('../packages/module')
+        export type Example<K, V> = module.Example<K, V>
+        return module
+        "
         );
     }
 }

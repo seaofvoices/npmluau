@@ -1,8 +1,0 @@
----
-source: src/lib.rs
-expression: result
----
-local module = require('../packages/module')
-export type Fn<R...> = module.Fn<R...>
-return module
-
