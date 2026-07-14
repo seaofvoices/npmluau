@@ -1,5 +1,6 @@
 /.github/**
 
+/biome.json
 .eslintrc.json
 .prettierignore
 .prettierrc

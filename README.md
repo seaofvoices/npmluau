@@ -1,8 +1,14 @@
+<div align="center">
+
 [![checks](https://github.com/seaofvoices/npmluau/actions/workflows/test.yml/badge.svg)](https://github.com/seaofvoices/npmluau/actions/workflows/test.yml)
 ![version](https://img.shields.io/github/package-json/v/seaofvoices/npmluau)
-[![GitHub top language](https://img.shields.io/github/languages/top/seaofvoices/npmluau)](https://github.com/luau-lang/luau)
+[![GitHub top language](https://img.shields.io/github/languages/top/seaofvoices/npmluau)](https://rust-lang.org/)
 ![license](https://img.shields.io/npm/l/npmluau)
 ![npm](https://img.shields.io/npm/dt/npmluau)
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/seaofvoices)
+
+</div>
 
 # npmluau
 
@@ -11,6 +17,8 @@ This utility can be used to allow Luau projects to use npm as a package manager.
 If you are interested to know why should use npm for Luau development, read [Why You Should Use npm for Luau](https://medium.com/@jeparlefrancais/why-you-should-use-npm-for-luau-22113f54f1fa).
 
 If you are developing on a platform that does not support requires with, you can use a tool like [darklua](https://github.com/seaofvoices/darklua) to automatically convert requires into your platform specific implementation.
+
+For real examples, there is the [Awesome Luau List](https://github.com/seaofvoices/awesome-luau) that contains many Luau packages (published to npm!) following the [Sea of Voices Luau Package Standard](https://github.com/seaofvoices/luau-package-standard).
 
 ## How to use
 

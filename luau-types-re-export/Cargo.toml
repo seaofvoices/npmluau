@@ -16,12 +16,12 @@ github = { repository = "seaofvoices/npmluau" }
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-full_moon = { version = "1.2.0", features = ["roblox"] }
-stylua = { version = "2.0.2", features = ["luau"], default-features = false }
-wasm-bindgen = "0.2"
+full_moon = { version = "2.2.0", features = ["roblox"] }
+stylua = { version = "2.5.2", features = ["luau"], default-features = false }
+wasm-bindgen = "0.2.126"
 
 [dev-dependencies]
-insta = "1.42.0"
+insta = "1.48.0"
 
 [profile.release]
 lto = true

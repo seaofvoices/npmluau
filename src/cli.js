@@ -67,7 +67,7 @@ const createCLI = () => {
 
         try {
           await fs.stat(projectNodeModules)
-        } catch (err) {
+        } catch (_err) {
           log.error(`unable to find modules folder at ${projectNodeModules}`)
           process.exit(1)
         }
